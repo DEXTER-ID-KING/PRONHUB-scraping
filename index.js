@@ -85,14 +85,20 @@ app.get('/api/video-details', async (req, res) => {
         download_urls = await Promise.all(flashvars.mediaDefinitions
           .filter(obj => obj.videoUrl && obj.quality)
           .map(async obj => {
-            let size = 'Unknown';
-            try {
-              const head = await axios.head(obj.videoUrl);
-              const bytes = parseInt(head.headers['content-length']);
-              size = bytes ? `${(bytes / 1024 / 1024).toFixed(2)} MB` : 'Unknown';
-            } catch (e) {}
+            let size = 'Streaming (m3u8)';
+            if (obj.videoUrl.endsWith('.mp4')) {
+              try {
+                const head = await axios.head(obj.videoUrl);
+                const bytes = parseInt(head.headers['content-length']);
+                if (bytes && !isNaN(bytes)) {
+                  size = `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+                }
+              } catch (e) {
+                size = 'Unknown';
+              }
+            }
             return {
-              quality: obj.quality,
+              quality: obj.quality || 'Unknown',
               url: obj.videoUrl,
               size
             };
