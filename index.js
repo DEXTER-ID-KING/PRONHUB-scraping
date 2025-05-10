@@ -4,9 +4,34 @@ const cheerio = require('cheerio');
 const cors = require('cors');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(cors());
 
-const PORT = process.env.PORT || 3000;
+// 🕊️ Middleware to add developer to every response
+app.use((req, res, next) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (typeof body === 'object' && !Array.isArray(body)) {
+      body.developer = 'Dexter 🕊️';
+    }
+    return originalJson(body);
+  };
+  next();
+});
+
+// ✅ API Status
+app.get('/api/status', (req, res) => {
+  res.json({
+    status: 'online',
+    server_time: new Date().toISOString(),
+    endpoints: {
+      search: '/api/search?q=stepmom',
+      videoDetails: '/api/video-details?q=https://www.pornhub.com/view_video.php?viewkey=...',
+      categories: '/api/category?q=new|top|mostviewed'
+    }
+  });
+});
 
 // 🔍 Search API
 app.get('/api/search', async (req, res) => {
@@ -24,20 +49,20 @@ app.get('/api/search', async (req, res) => {
     $('.videoblock.videoBox').each((i, el) => {
       const title = $(el).find('span.title a').text().trim();
       const url = 'https://www.pornhub.com' + $(el).find('span.title a').attr('href');
-      const img = $(el).find('img').attr('data-thumb_url') || $(el).find('img').attr('src');
+      const image = $(el).find('img').attr('data-mediumthumb') || $(el).find('img').attr('data-thumb_url');
       const views = $(el).find('.views var').text().trim();
-      results.push({ title, url, image: img, views });
+      results.push({ title, url, image, views });
     });
 
-    res.json(results);
+    res.json({ results });
   } catch (err) {
     res.status(500).json({ error: 'Search failed', details: err.message });
   }
 });
 
-// 🎬 Video Detail API
+// 🎬 Video Details API
 app.get('/api/video-details', async (req, res) => {
-  const videoUrl = req.query.url;
+  const videoUrl = req.query.q;
   if (!videoUrl) return res.status(400).json({ error: 'Missing url param' });
 
   try {
@@ -57,9 +82,21 @@ app.get('/api/video-details', async (req, res) => {
     if (match) {
       const flashvars = JSON.parse(match[1]);
       if (flashvars.mediaDefinitions) {
-        download_urls = flashvars.mediaDefinitions
+        download_urls = await Promise.all(flashvars.mediaDefinitions
           .filter(obj => obj.videoUrl && obj.quality)
-          .map(obj => ({ quality: obj.quality, url: obj.videoUrl }));
+          .map(async obj => {
+            let size = 'Unknown';
+            try {
+              const head = await axios.head(obj.videoUrl);
+              const bytes = parseInt(head.headers['content-length']);
+              size = bytes ? `${(bytes / 1024 / 1024).toFixed(2)} MB` : 'Unknown';
+            } catch (e) {}
+            return {
+              quality: obj.quality,
+              url: obj.videoUrl,
+              size
+            };
+          }));
       }
     }
 
@@ -69,6 +106,38 @@ app.get('/api/video-details', async (req, res) => {
   }
 });
 
+// 📂 Category Videos API
+app.get('/api/category', async (req, res) => {
+  const category = req.query.q || 'new';
+  let url = 'https://www.pornhub.com/video';
+
+  if (category === 'top') url = 'https://www.pornhub.com/video?o=tr';
+  else if (category === 'mostviewed') url = 'https://www.pornhub.com/video?o=mv';
+  else url = 'https://www.pornhub.com/video?o=mr';
+
+  try {
+    const { data } = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    const $ = cheerio.load(data);
+    const results = [];
+
+    $('.videoblock.videoBox').each((i, el) => {
+      const title = $(el).find('span.title a').text().trim();
+      const videoUrl = 'https://www.pornhub.com' + $(el).find('span.title a').attr('href');
+      const image = $(el).find('img').attr('data-mediumthumb') || $(el).find('img').attr('data-thumb_url');
+      const views = $(el).find('.views var').text().trim();
+      results.push({ title, url: videoUrl, image, views });
+    });
+
+    res.json({ category, results });
+  } catch (err) {
+    res.status(500).json({ error: 'Category load failed', details: err.message });
+  }
+});
+
+// ✅ Start Server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`API running on port ${PORT}`);
 });
