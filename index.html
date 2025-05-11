@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dexter Pornhub API UI</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #111;
+      color: #eee;
+      padding: 20px;
+    }
+    h1 {
+      color: #f90;
+    }
+    input, button {
+      padding: 10px;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    .video-card {
+      background: #222;
+      padding: 15px;
+      margin: 15px 0;
+      border-radius: 8px;
+    }
+    img {
+      max-width: 100%;
+    }
+    .info {
+      margin: 10px 0;
+    }
+    .download {
+      background: #333;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    .tag {
+      background: #444;
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-right: 5px;
+      color: #ccc;
+    }
+    .developer {
+      font-size: 14px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <h1>Dexter Pornhub API Explorer 🕊️</h1>
+
+  <h2>🔍 Search Videos</h2>
+  <input type="text" id="search" placeholder="Search for videos...">
+  <button onclick="searchVideos()">Search</button>
+  <div id="searchResults"></div>
+
+  <h2>📹 Get Video Details</h2>
+  <input type="text" id="videoUrl" placeholder="Enter video URL">
+  <button onclick="getVideoDetails()">Get Details</button>
+  <div id="videoDetails"></div>
+
+  <h2>📂 Categories</h2>
+  <button onclick="loadCategories()">Load Categories</button>
+  <div id="categories"></div>
+
+  <h2>📡 API Status</h2>
+  <button onclick="getStatus()">Check Status</button>
+  <div id="status"></div>
+
+  <script>
+    const base = "https://get-api-uqcp.onrender.com/api";
+
+    async function searchVideos() {
+      const q = document.getElementById("search").value;
+      const res = await fetch(`${base}/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const container = document.getElementById("searchResults");
+      container.innerHTML = "";
+      if (data.results) {
+        data.results.forEach(v => {
+          const el = document.createElement("div");
+          el.className = "video-card";
+          el.innerHTML = `
+            <img src="${v.image}" alt="Thumbnail" />
+            <div class="info"><strong>${v.title}</strong></div>
+            <div class="info">Views: ${v.views}</div>
+            <div class="info">Link: <a href="${v.url}" target="_blank">Watch</a></div>
+            <div class="developer">Developer: ${data.developer}</div>
+          `;
+          container.appendChild(el);
+        });
+      } else {
+        container.innerHTML = "No results found.";
+      }
+    }
+
+    async function getVideoDetails() {
+      const url = document.getElementById("videoUrl").value;
+      const res = await fetch(`${base}/video-details?q=${encodeURIComponent(url)}`);
+      const data = await res.json();
+      const container = document.getElementById("videoDetails");
+      container.innerHTML = "";
+
+      if (data.title) {
+        const el = document.createElement("div");
+        el.className = "video-card";
+        el.innerHTML = `
+          <div class="info"><strong>${data.title}</strong></div>
+          <div class="info">Views: ${data.views || 'N/A'}</div>
+          <div class="info">Likes: ${data.likes || 'N/A'}, Dislikes: ${data.dislikes || 'N/A'}</div>
+          <div class="info">Developer: ${data.developer}</div>
+        `;
+        data.download_urls.forEach(dl => {
+          const dlEl = document.createElement("div");
+          dlEl.className = "download";
+          dlEl.innerHTML = `
+            <div>Quality: ${dl.quality}</div>
+            <div>Size: ${dl.size || 'Unknown'}</div>
+            <a href="${dl.url}" target="_blank">Download Link</a>
+          `;
+          el.appendChild(dlEl);
+        });
+        container.appendChild(el);
+      } else {
+        container.innerHTML = "No details found.";
+      }
+    }
+
+    async function loadCategories() {
+      const res = await fetch(`${base}/categories`);
+      const data = await res.json();
+      const container = document.getElementById("categories");
+      container.innerHTML = data.categories.map(cat => `<span class="tag">${cat}</span>`).join(" ");
+    }
+
+    async function getStatus() {
+      const res = await fetch(`${base}/status`);
+      const data = await res.json();
+      document.getElementById("status").innerHTML = `
+        <div>🔄 Status: ${data.status}</div>
+        <div class="developer">Developer: ${data.developer}</div>
+      `;
+    }
+  </script>
+</body>
+</html>
