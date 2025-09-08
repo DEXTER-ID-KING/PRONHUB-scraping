@@ -5,31 +5,43 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
 
 const app = express();
 const port = process.env.PORT || 3000;
-
-// Auto-download yt-dlp binary
-async function ensureBinary() {
-  try {
-    const binaryPath = path.join(__dirname, 'yt-dlp' + (os.platform() === 'win32' ? '.exe' : ''));
-    if (!fs.existsSync(binaryPath)) {
-      console.log('📥 Downloading yt-dlp binary...');
-      await YTDlpWrap.downloadFromGithub(binaryPath);
-      console.log('✅ yt-dlp binary downloaded!');
-    }
-    return binaryPath;
-  } catch (err) {
-    console.error('❌ Failed to download yt-dlp:', err.message);
-    throw err;
-  }
-}
 
 app.use(cors());
 app.use(express.json());
 
 const downloadsDir = path.join(__dirname, 'downloads');
 if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
+
+// Function to get yt-dlp path
+async function getYtDlpBinary() {
+  try {
+    if (process.env.YT_DLP_PATH) {
+      console.log('Using yt-dlp from YT_DLP_PATH environment variable.');
+      return process.env.YT_DLP_PATH;
+    }
+
+    const binaryPath = path.join(__dirname, 'yt-dlp' + (os.platform() === 'win32' ? '.exe' : ''));
+    if (!fs.existsSync(binaryPath)) {
+      console.log('📥 Attempting to download yt-dlp binary...');
+      try {
+        await YTDlpWrap.downloadFromGithub(binaryPath);
+        console.log('✅ yt-dlp binary downloaded!');
+      } catch (err) {
+        console.warn('⚠️ yt-dlp download failed, continuing with system-installed yt-dlp if available.');
+      }
+    } else {
+      console.log('✅ yt-dlp binary already exists.');
+    }
+    return binaryPath;
+  } catch (err) {
+    console.error('❌ Error getting yt-dlp binary:', err.message || err);
+    return null; // fallback
+  }
+}
 
 // API endpoint
 app.get('/download', async (req, res) => {
@@ -39,8 +51,12 @@ app.get('/download', async (req, res) => {
   }
 
   try {
-    const binaryPath = await ensureBinary();
-    const ytDlp = new YTDlpWrap(binaryPath);
+    const ytDlpPath = await getYtDlpBinary();
+    if (!ytDlpPath) {
+      console.warn('⚠️ yt-dlp binary not available, using system yt-dlp if installed.');
+    }
+
+    const ytDlp = new YTDlpWrap(ytDlpPath || 'yt-dlp');
 
     console.log(`🔍 Fetching info for: ${url}`);
     const videoInfo = await ytDlp.getVideoInfo(url);
@@ -49,7 +65,6 @@ app.get('/download', async (req, res) => {
     const safeTitle = title.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
     const outputPath = path.join(downloadsDir, `${safeTitle}.mp4`);
 
-    // find best format (prefer mp4, fallback to m3u8)
     let bestFormat = videoInfo.formats.find(f => f.ext === 'mp4' && f.vcodec !== 'none');
     if (!bestFormat) {
       bestFormat = videoInfo.formats.find(f => f.protocol === 'm3u8');
@@ -66,20 +81,15 @@ app.get('/download', async (req, res) => {
     // If .m3u8 -> convert with ffmpeg
     if (bestFormat.protocol === 'm3u8') {
       console.log('🚀 Starting ffmpeg conversion...');
-      const ffmpeg = spawn('ffmpeg', [
+      const ffmpeg = spawn(ffmpegPath, [
         '-i', formatUrl,
         '-c', 'copy',
         '-y',
         outputPath
       ]);
 
-      ffmpeg.stdout.on('data', (data) => {
-        console.log(`ffmpeg stdout: ${data}`);
-      });
-
-      ffmpeg.stderr.on('data', (data) => {
-        console.log(`ffmpeg stderr: ${data}`);
-      });
+      ffmpeg.stdout.on('data', (data) => console.log(`ffmpeg stdout: ${data}`));
+      ffmpeg.stderr.on('data', (data) => console.log(`ffmpeg stderr: ${data}`));
 
       ffmpeg.on('close', (code) => {
         if (code === 0) {
@@ -96,7 +106,6 @@ app.get('/download', async (req, res) => {
         }
       });
     } else {
-      // If mp4 already → just return direct url
       console.log('⚡ Direct mp4 stream found, no conversion needed.');
       res.json({
         title,
@@ -104,9 +113,10 @@ app.get('/download', async (req, res) => {
         note: 'Direct mp4 stream (no conversion needed)'
       });
     }
+
   } catch (error) {
-    console.error('❌ API error:', error.message);
-    res.status(500).json({ error: `Failed to fetch video info: ${error.message}` });
+    console.error('❌ API error:', error.message || error);
+    res.status(500).json({ error: `Failed to fetch video info: ${error.message || error}` });
   }
 });
 
@@ -115,16 +125,5 @@ app.use('/files', express.static(downloadsDir));
 
 app.get('/', (req, res) => res.send('Pornhub Downloader API is running!'));
 
-// Start server after ensuring binary
-async function startServer() {
-  try {
-    await ensureBinary();
-    app.listen(port, () => {
-      console.log(`🚀 Server running on port ${port}`);
-    });
-  } catch (err) {
-    console.error('❌ Server failed to start:', err.message);
-  }
-}
-
-startServer();
+// Start server
+app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
