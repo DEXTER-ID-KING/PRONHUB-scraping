@@ -23,7 +23,7 @@
     "node": ">=16.0.0"
   },
   "optionalDependencies": {
-    "ffmpeg-static": "^6.0.0"
+    "ffmpeg-static": "latest"
   },
   "keywords": [
     "pornhub",
