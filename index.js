@@ -15,17 +15,28 @@ app.use(express.json());
 const downloadsDir = path.join(__dirname, 'downloads');
 if (!fs.existsSync(downloadsDir)) fs.mkdirSync(downloadsDir);
 
-// Helper function to sanitize file names
+// Sanitize filenames
 function sanitizeFilename(name) {
   return name.replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
 }
 
-// Download and convert function
-async function downloadFormat(fmt, title) {
-  return new Promise((resolve, reject) => {
+// Download or convert mp4 (server-side)
+async function processFormat(fmt, title) {
+  return new Promise((resolve) => {
     const quality = fmt.height ? `${fmt.height}p` : 'unknown';
     const safeTitle = sanitizeFilename(title);
-    const outputPath = path.join(downloadsDir, `${safeTitle}_${quality}.mp4`);
+    const filename = `${safeTitle}_${quality}_${Date.now()}.mp4`;
+    const outputPath = path.join(downloadsDir, filename);
+
+    const finalize = () => {
+      // Auto-delete after 3 minutes
+      setTimeout(() => {
+        fs.unlink(outputPath, err => {
+          if (!err) console.log(`🗑️ Deleted temp file: ${outputPath}`);
+        });
+      }, 3 * 60 * 1000); // 3 minutes
+      resolve({ quality, url: `/files/${encodeURIComponent(filename)}` });
+    };
 
     if (fmt.protocol === 'm3u8') {
       console.log(`🚀 Converting m3u8 → mp4: ${quality}`);
@@ -37,14 +48,13 @@ async function downloadFormat(fmt, title) {
       ffmpeg.on('close', code => {
         if (code === 0) {
           console.log(`✅ Converted: ${outputPath}`);
-          resolve({ quality, download: `/files/${encodeURIComponent(path.basename(outputPath))}` });
+          finalize();
         } else {
           console.error(`❌ ffmpeg failed for ${quality} with code: ${code}`);
           resolve(null);
         }
       });
     } else {
-      // For direct mp4 streams, download server-side
       console.log(`⬇️ Downloading direct mp4: ${quality}`);
       const file = fs.createWriteStream(outputPath);
       const https = require('https');
@@ -58,7 +68,7 @@ async function downloadFormat(fmt, title) {
         file.on('finish', () => {
           file.close();
           console.log(`✅ Downloaded: ${outputPath}`);
-          resolve({ quality, download: `/files/${encodeURIComponent(path.basename(outputPath))}` });
+          finalize();
         });
       }).on('error', err => {
         console.error(`❌ Download error for ${quality}: ${err}`);
@@ -77,28 +87,30 @@ app.get('/download', async (req, res) => {
 
   try {
     console.log(`🔍 Fetching info for: ${url}`);
-
     const info = await ytdlp(url, { dumpSingleJson: true, noCheckCertificates: true });
     const title = info.title || 'Unknown';
 
+    // Get all mp4 formats
     const mp4Formats = info.formats.filter(f => f.ext === 'mp4' && f.vcodec !== 'none');
-    if (mp4Formats.length === 0) return res.status(404).json({ error: 'No mp4 formats available!' });
+
+    if (mp4Formats.length === 0) return res.status(404).json({ error: 'No mp4 formats found!' });
 
     const results = [];
     for (let fmt of mp4Formats) {
-      const result = await downloadFormat(fmt, title);
-      if (result) results.push(result);
+      const processed = await processFormat(fmt, title);
+      if (processed) results.push(processed);
     }
 
+    console.log(`✅ Processed ${results.length} mp4 formats`);
     res.json({
       title,
       formats: results,
-      note: 'All mp4 formats downloaded/converted server-side'
+      note: 'Server-side downloaded/converted mp4 files. Temporary 3-minute links, .m3u8 converted or skipped.'
     });
 
   } catch (error) {
     console.error('❌ API error:', error);
-    res.status(500).json({ error: `Failed to fetch or download video: ${error}` });
+    res.status(500).json({ error: `Failed to fetch or process video: ${error}` });
   }
 });
 
