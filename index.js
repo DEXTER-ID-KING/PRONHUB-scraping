@@ -105,7 +105,7 @@ app.get('/download', async (req, res) => {
     res.json({
       title,
       formats: results,
-      note: 'Server-side downloaded/converted mp4 files. Temporary 3-minute links, .m3u8 converted or skipped.'
+      note: 'Server-side downloaded/converted mp4 files. Temporary 3-minute links. .m3u8 converted or skipped.'
     });
 
   } catch (error) {
